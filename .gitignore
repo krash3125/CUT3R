@@ -53,3 +53,7 @@ docs/_build/
 *.pth
 data
 src/checkpoints
+tmp/
+tmp_filtered_frames/
+example/005/
+example/006/
