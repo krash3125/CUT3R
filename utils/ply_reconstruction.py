@@ -6,7 +6,7 @@ import open3d as o3d
 
 def create_point_cloud(pts3ds_other, colors, conf, cam_dict, output_dir):
     # Process outputs for visualization.
-    print("Preparing output for saving...")
+    print("Generating point cloud...")
     start_time = time.time()
 
     # Convert tensors to numpy arrays for saving.

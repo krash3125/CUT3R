@@ -30,7 +30,7 @@ from copy import deepcopy
 from add_ckpt_path import add_path_to_dust3r
 import imageio.v2 as iio
 import open3d as o3d
-import utils.simm as simm
+from utils.simm import ssim_compare_frames
 from utils.ply_reconstruction import create_point_cloud, create_mesh
 
 # Set random seed for reproducibility.
@@ -292,10 +292,55 @@ def prepare_output(outputs, outdir, revisit=1, use_pose=True):
     return pts3ds_other, colors, conf_other, cam_dict
 
 
-def parse_seq_path(p):
+def parse_seq_path(p, skip_frames=True):
     if os.path.isdir(p):
         img_paths = sorted(glob.glob(f"{p}/*"))
         tmpdirname = None
+    elif skip_frames == True:
+        dim=(112,112)
+        cap = cv2.VideoCapture(p)
+        if not cap.isOpened():
+            raise ValueError(f"Error opening video file {p}")
+        video_fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if video_fps == 0:
+            cap.release()
+            raise ValueError(f"Error: Video FPS is 0 for {p}")
+        frame_interval = 1
+        frame_indices = list(range(0, total_frames, frame_interval))
+        print(
+            f" - Video FPS: {video_fps}, Frame Interval: {frame_interval}, Total Frames to Read: {len(frame_indices)}"
+        )
+        img_paths = []
+        tmpdirname = tempfile.mkdtemp()
+        last_saved_frame = None
+        # Now we are parsing the frames here:
+        for i in frame_indices:
+            # cap.set(cv2.CAP_PROP_POS_FRAMES, i) -- THIS LINE OF CODE SLOWS IT DOWN SO MUCH 
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if i % frame_interval != 0:
+                continue
+
+            if last_saved_frame is not None:
+                score = ssim_compare_frames(last_saved_frame, frame, dim)
+
+                if score < .5:
+                    # print("Less than 50% similariy, save")
+                    frame_path = os.path.join(tmpdirname, f"frame_{i}.jpg")
+                    cv2.imwrite(frame_path, frame)
+                    img_paths.append(frame_path)
+                    last_saved_frame = cv2.resize(frame, dim, interpolation=cv2.INTER_AREA)
+
+            else:
+                frame_path = os.path.join(tmpdirname, f"frame_{i}.jpg")
+                cv2.imwrite(frame_path, frame)
+                img_paths.append(frame_path)
+                last_saved_frame = cv2.resize(frame, dim, interpolation=cv2.INTER_AREA)
+
+        cap.release()
     else:
         cap = cv2.VideoCapture(p)
         if not cap.isOpened():
@@ -313,10 +358,13 @@ def parse_seq_path(p):
         img_paths = []
         tmpdirname = tempfile.mkdtemp()
         for i in frame_indices:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+            # cap.set(cv2.CAP_PROP_POS_FRAMES, i) -- shit line 
             ret, frame = cap.read()
             if not ret:
                 break
+            if i % frame_interval != 0:
+                continue
+
             frame_path = os.path.join(tmpdirname, f"frame_{i}.jpg")
             cv2.imwrite(frame_path, frame)
             img_paths.append(frame_path)
@@ -346,10 +394,17 @@ def run_inference(args):
     from viser_utils import PointCloudViewer
 
     # Prepare image file paths.
+    start_time = time.time()
+
     img_paths, tmpdirname = parse_seq_path(args.seq_path)
     if not img_paths:
         print(f"No images found in {args.seq_path}. Please verify the path.")
         return
+    total_time = time.time() - start_time
+    print(
+        f"Prepare image paths took {total_time:.2f} seconds."
+    )
+    
 
     print(f"Found {len(img_paths)} images in {args.seq_path}.")
     img_mask = [True] * len(img_paths)
@@ -396,7 +451,8 @@ def run_inference(args):
 
     # Convert tensors to numpy arrays for saving.
     pcd_down = create_point_cloud(pts3ds_other, colors, conf, cam_dict, args.output_dir)
-    mesh_crop = create_mesh(pcd_down, args.output_dir)
+    # mesh_crop = create_mesh(pcd_down, args.output_dir)
+    return len(img_paths)
 
 
 def main():
@@ -407,11 +463,17 @@ def main():
         )
         return
     else:
-        run_inference(args)
+        return run_inference(args)
 
 
 if __name__ == "__main__":
     start_time = time.time()
-    main()
+    num_frames = main()
     total_time = time.time() - start_time
     print(f"Total script run time: {total_time:.2f} seconds.")
+    
+    if num_frames is None:
+        num_frames = 1
+
+    print(f"Number of Frames: {num_frames}")
+    print(f"Average time per frame: {total_time/num_frames:.2f} seconds.")
