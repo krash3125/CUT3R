@@ -78,6 +78,12 @@ def parse_args():
         default="./demo_tmp",
         help="value for tempfile.tempdir",
     )
+    parser.add_argument(
+        "--skip_frames",
+        type=int,
+        default="1",
+        help="value for auto skipping frames 0 is false 1 is true",
+    )
 
     return parser.parse_args()
 
@@ -292,7 +298,7 @@ def prepare_output(outputs, outdir, revisit=1, use_pose=True):
     return pts3ds_other, colors, conf_other, cam_dict
 
 
-def parse_seq_path(p, skip_frames=True):
+def parse_seq_path(p, skip_frames=False):
     if os.path.isdir(p):
         img_paths = sorted(glob.glob(f"{p}/*"))
         tmpdirname = None
@@ -394,9 +400,11 @@ def run_inference(args):
     from viser_utils import PointCloudViewer
 
     # Prepare image file paths.
+    print("Prepare image file paths")
     start_time = time.time()
 
-    img_paths, tmpdirname = parse_seq_path(args.seq_path)
+    skip_frames = True if args.skip_frames == 1 else False
+    img_paths, tmpdirname = parse_seq_path(args.seq_path, skip_frames)
     if not img_paths:
         print(f"No images found in {args.seq_path}. Please verify the path.")
         return
@@ -467,6 +475,7 @@ def main():
 
 
 if __name__ == "__main__":
+    print("Script starting")
     start_time = time.time()
     num_frames = main()
     total_time = time.time() - start_time
